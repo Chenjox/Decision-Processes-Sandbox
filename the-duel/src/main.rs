@@ -5,7 +5,7 @@ use rand_chacha::ChaCha12Rng;
 
 pub enum Action {
     ATTACK,
-    COUNTER
+    FINCH
 }
 
 pub enum GameOutcome {
@@ -28,6 +28,8 @@ struct GameState {
 trait GameAgent {
 
     fn decide_action(&mut self, own_player_state: &PlayerState, opposing_player_state: &Option<PlayerState>) -> Action;
+
+    fn strategy_name(&self) -> String;
 }
 
 struct Game {
@@ -51,28 +53,29 @@ impl Game {
                 state.player_two_state.current_hit_points -= 1;
             },
             // First Attacks, Second Counters!
-            (Action::ATTACK,Action::COUNTER) => {
-                state.player_two_state.current_hit_points -= 2;
-            },
-            // First Counters, Second Attacks!
-            (Action::COUNTER,Action::ATTACK) => {
+            (Action::ATTACK,Action::FINCH) => {
                 state.player_one_state.current_hit_points -= 2;
             },
-            (Action::COUNTER,Action::COUNTER) => {
-                // Tumbleweed dances across the scene
+            // First Counters, Second Attacks!
+            (Action::FINCH,Action::ATTACK) => {
+                state.player_two_state.current_hit_points -= 2;
+            },
+            (Action::FINCH,Action::FINCH) => {
+                state.player_one_state.current_hit_points -= 2;
+                state.player_two_state.current_hit_points -= 2;
             }
         }
     }
 
     fn check_end_condition(&self, state: &GameState) -> GameOutcome{
-        if state.player_one_state.current_hit_points <= 0 && state.player_one_state.current_hit_points <= 0 {
+        if state.player_one_state.current_hit_points <= 0 && state.player_two_state.current_hit_points <= 0 {
             return GameOutcome::TIE;
         }
         if state.player_one_state.current_hit_points <= 0 {
-            return GameOutcome::WIN(1);
+            return GameOutcome::WIN(2);
         }
         if state.player_two_state.current_hit_points <= 0 {
-            return GameOutcome::WIN(0);
+            return GameOutcome::WIN(1);
         }
         return GameOutcome::CONTINUE;
     }
@@ -82,23 +85,32 @@ impl Game {
 struct AttackAgent;
 
 impl GameAgent for AttackAgent {
-    fn decide_action(&mut self, own_player_state: &PlayerState, opposing_player_state: &Option<PlayerState>) -> Action {
+    fn decide_action(&mut self, _own_player_state: &PlayerState, _opposing_player_state: &Option<PlayerState>) -> Action {
         return Action::ATTACK;
+    }
+
+    fn strategy_name(&self) -> String {
+        return String::from("Always Attack");
     }
 }
 
 struct RandomAgent<T : Rng> {
-    current_random: T
+    current_random: T,
+    probability_of_attack: f64
 }
 
 impl<T : Rng> GameAgent for RandomAgent<T> {
-    fn decide_action(&mut self, own_player_state: &PlayerState, opposing_player_state: &Option<PlayerState>) -> Action {
-        let decision = self.current_random.random_bool(0.5);
+    fn decide_action(&mut self, _own_player_state: &PlayerState, _opposing_player_state: &Option<PlayerState>) -> Action {
+        let decision = self.current_random.random_bool(self.probability_of_attack);
         if decision {
             return Action::ATTACK;
         } else {
-            return Action::COUNTER;
+            return Action::FINCH;
         }
+    }
+
+    fn strategy_name(&self) -> String {
+        return format!("Attack with probability {}", self.probability_of_attack);
     }
 }
 
@@ -106,12 +118,13 @@ fn main() {
     println!("Initializing Game");
 
     let max_hp = 100;
-    let rng = ChaCha12Rng::seed_from_u64( 100 );
+    let rng = ChaCha12Rng::seed_from_u64( 101 );
     
     let mut game = Game {
         player_one_agent: Box::new(AttackAgent),
         player_two_agent: Box::new(RandomAgent {
-            current_random: rng
+            current_random: rng,
+            probability_of_attack: 0.5
         })
     };
 
@@ -133,10 +146,13 @@ fn main() {
         let condition = game.check_end_condition(&state);
         match condition {
             GameOutcome::WIN(id) => {
-                println!("Status [Current/Max]:\n Player 1: {}/{} HP\n Player 2: {}/{} HP", &state.player_one_state.current_hit_points, 
+                println!("Status [Current/Max]:\n Player 1: {}/{} HP running strategy: {}\n Player 2: {}/{} HP running strategy: {}", 
+                &state.player_one_state.current_hit_points, 
                 &state.player_one_state.max_hit_points, 
+                &game.player_one_agent.strategy_name(),
                 &state.player_two_state.current_hit_points,
-                &state.player_two_state.max_hit_points);
+                &state.player_two_state.max_hit_points,
+                &game.player_two_agent.strategy_name(),);
                 println!("Player {} wins!",id);
                 break;
             },
