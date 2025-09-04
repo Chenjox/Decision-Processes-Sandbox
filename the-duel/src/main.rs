@@ -1,13 +1,16 @@
+use std::fs::File;
+use std::io::Write;
+
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha12Rng;
 
 
 
+#[derive(Clone)]
 pub enum Action {
     ATTACK,
     FINCH
 }
-
 pub enum GameOutcome {
     WIN(u64),
     TIE,
@@ -61,8 +64,8 @@ impl Game {
                 state.player_two_state.current_hit_points -= 2;
             },
             (Action::FINCH,Action::FINCH) => {
-                state.player_one_state.current_hit_points -= 2;
-                state.player_two_state.current_hit_points -= 2;
+                state.player_one_state.current_hit_points -= 1;
+                state.player_two_state.current_hit_points -= 1;
             }
         }
     }
@@ -114,17 +117,56 @@ impl<T : Rng> GameAgent for RandomAgent<T> {
     }
 }
 
+struct MarkovRandomAgent<T : Rng> {
+    current_random: T,
+    change_to_attack_prob: f64,
+    change_to_finch_prob: f64,
+    current_strategy: Action
+}
+
+impl<T : Rng> GameAgent for MarkovRandomAgent<T> {
+
+    fn decide_action(&mut self, _own_player_state: &PlayerState, _opposing_player_state: &Option<PlayerState>) -> Action {
+        
+        match self.current_strategy {
+            Action::ATTACK => {
+                let decision = self.current_random.random_bool(self.change_to_finch_prob);
+                if decision {
+                    self.current_strategy = Action::FINCH;
+                }
+            }
+            Action::FINCH => {
+                let decision = self.current_random.random_bool(self.change_to_attack_prob);
+                if decision {
+                    self.current_strategy = Action::ATTACK;
+                }
+            }
+        }
+
+        return self.current_strategy.clone();
+    }
+
+    fn strategy_name(&self) -> String {
+        return format!("Markov Chain with probabilities {}, {}", self.change_to_attack_prob, self.change_to_finch_prob);
+    }
+}
+
 fn main() {
     println!("Initializing Game");
 
     let max_hp = 100;
-    let rng = ChaCha12Rng::seed_from_u64( 101 );
+    let rng = ChaCha12Rng::seed_from_u64( 102 );
     
     let mut game = Game {
-        player_one_agent: Box::new(AttackAgent),
+        player_one_agent: Box::new(MarkovRandomAgent {
+            current_random: rng.clone(),
+            change_to_attack_prob: 0.05,
+            change_to_finch_prob: 0.8,
+            current_strategy: Action::ATTACK
+        }),
         player_two_agent: Box::new(RandomAgent {
             current_random: rng,
-            probability_of_attack: 0.5
+            probability_of_attack: 0.1
         })
     };
 
@@ -138,15 +180,26 @@ fn main() {
             current_hit_points: max_hp
         } 
     };
+    let path = "results.csv";
+    let mut output = File::create(path).unwrap();
+    let mut step_count = 0;
     loop {
         // step
         game.step_game(&mut state);
+        
+        // writeout
+        
+        write!(output, "{},{},{}\n", 
+        step_count, 
+        &state.player_one_state.current_hit_points, 
+        &state.player_two_state.current_hit_points).unwrap();
 
         // check
         let condition = game.check_end_condition(&state);
         match condition {
             GameOutcome::WIN(id) => {
-                println!("Status [Current/Max]:\n Player 1: {}/{} HP running strategy: {}\n Player 2: {}/{} HP running strategy: {}", 
+                println!("Status {} [Current/Max]:\n Player 1: {}/{} HP running strategy: {}\n Player 2: {}/{} HP running strategy: {}", 
+                step_count,
                 &state.player_one_state.current_hit_points, 
                 &state.player_one_state.max_hit_points, 
                 &game.player_one_agent.strategy_name(),
@@ -157,7 +210,9 @@ fn main() {
                 break;
             },
             GameOutcome::TIE => {
-                println!("Status [Current/Max]:\n Player 1: {}/{} HP\n Player 2: {}/{} HP", &state.player_one_state.current_hit_points, 
+                println!("Status {} [Current/Max]:\n Player 1: {}/{} HP\n Player 2: {}/{} HP", 
+                step_count,
+                &state.player_one_state.current_hit_points, 
                 &state.player_one_state.max_hit_points, 
                 &state.player_two_state.current_hit_points,
                 &state.player_two_state.max_hit_points);
@@ -168,12 +223,15 @@ fn main() {
                 panic!("Unexpected Event happened");
             }
             GameOutcome::CONTINUE => {
-                println!("Status [Current/Max]:\n Player 1: {}/{} HP\n Player 2: {}/{} HP", &state.player_one_state.current_hit_points, 
+                println!("Status {} [Current/Max]:\n Player 1: {}/{} HP\n Player 2: {}/{} HP", 
+                step_count,
+                &state.player_one_state.current_hit_points, 
                 &state.player_one_state.max_hit_points, 
                 &state.player_two_state.current_hit_points,
                 &state.player_two_state.max_hit_points);
             }
         }
+        step_count += 1;
     }
     println!("Game finished!");
 }
