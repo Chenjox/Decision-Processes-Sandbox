@@ -25,12 +25,14 @@ struct PlayerState {
 
 struct GameState {
     player_one_state: PlayerState,
-    player_two_state: PlayerState
+    player_two_state: PlayerState,
+    player_one_action: Option<Action>,
+    player_two_action: Option<Action>
 }
 
 trait GameAgent {
 
-    fn decide_action(&mut self, own_player_state: &PlayerState, opposing_player_state: &Option<PlayerState>) -> Action;
+    fn decide_action(&mut self, own_player_state: &PlayerState, opposing_player_actions: &Option<Action>, opposing_player_state: &Option<PlayerState>) -> Action;
 
     fn strategy_name(&self) -> String;
 }
@@ -44,8 +46,8 @@ impl Game {
     
     fn step_game(&mut self, state: &mut GameState){
         // get actions for current game state
-        let player_one_action = self.player_one_agent.decide_action(&state.player_one_state, &None);
-        let player_two_action = self.player_two_agent.decide_action(&state.player_two_state, &None);
+        let player_one_action = self.player_one_agent.decide_action(&state.player_one_state, &state.player_two_action,&None);
+        let player_two_action = self.player_two_agent.decide_action(&state.player_two_state, &state.player_one_action,&None);
         // Decide what happens
 
         // Check whether player attacks, or if player blocks
@@ -57,11 +59,11 @@ impl Game {
             },
             // First Attacks, Second Counters!
             (Action::ATTACK,Action::FINCH) => {
-                state.player_one_state.current_hit_points -= 2;
+                state.player_one_state.current_hit_points -= 1;
             },
             // First Counters, Second Attacks!
             (Action::FINCH,Action::ATTACK) => {
-                state.player_two_state.current_hit_points -= 2;
+                state.player_two_state.current_hit_points -= 1;
             },
             (Action::FINCH,Action::FINCH) => {
                 state.player_one_state.current_hit_points -= 1;
@@ -88,7 +90,7 @@ impl Game {
 struct AttackAgent;
 
 impl GameAgent for AttackAgent {
-    fn decide_action(&mut self, _own_player_state: &PlayerState, _opposing_player_state: &Option<PlayerState>) -> Action {
+    fn decide_action(&mut self, _own_player_state: &PlayerState, _opposing_player_actions: &Option<Action>, _opposing_player_state: &Option<PlayerState>) -> Action {
         return Action::ATTACK;
     }
 
@@ -97,13 +99,30 @@ impl GameAgent for AttackAgent {
     }
 }
 
+struct MirrorAgent;
+
+impl GameAgent for MirrorAgent {
+    fn decide_action(&mut self, _own_player_state: &PlayerState, opposing_player_actions: &Option<Action>, _opposing_player_state: &Option<PlayerState>) -> Action {
+        if let Some(action) = opposing_player_actions {
+            return action.clone();
+        } else {
+            return Action::ATTACK;
+        }
+    }
+
+    fn strategy_name(&self) -> String {
+        return String::from("Always Mirror the opposing action");
+    }
+}
+
+
 struct RandomAgent<T : Rng> {
     current_random: T,
     probability_of_attack: f64
 }
 
 impl<T : Rng> GameAgent for RandomAgent<T> {
-    fn decide_action(&mut self, _own_player_state: &PlayerState, _opposing_player_state: &Option<PlayerState>) -> Action {
+    fn decide_action(&mut self, _own_player_state: &PlayerState, _opposing_player_actions: &Option<Action>, _opposing_player_state: &Option<PlayerState>) -> Action {
         let decision = self.current_random.random_bool(self.probability_of_attack);
         if decision {
             return Action::ATTACK;
@@ -126,7 +145,7 @@ struct MarkovRandomAgent<T : Rng> {
 
 impl<T : Rng> GameAgent for MarkovRandomAgent<T> {
 
-    fn decide_action(&mut self, _own_player_state: &PlayerState, _opposing_player_state: &Option<PlayerState>) -> Action {
+    fn decide_action(&mut self, _own_player_state: &PlayerState, _opposing_player_actions: &Option<Action>, _opposing_player_state: &Option<PlayerState>) -> Action {
         
         match self.current_strategy {
             Action::ATTACK => {
@@ -154,7 +173,7 @@ impl<T : Rng> GameAgent for MarkovRandomAgent<T> {
 fn main() {
     println!("Initializing Game");
 
-    let max_hp = 100;
+    let max_hp = 20;
     let rng = ChaCha12Rng::seed_from_u64( 102 );
     
     let mut game = Game {
@@ -166,7 +185,7 @@ fn main() {
         }),
         player_two_agent: Box::new(RandomAgent {
             current_random: rng,
-            probability_of_attack: 0.1
+            probability_of_attack: 0.01
         })
     };
 
@@ -178,7 +197,9 @@ fn main() {
         player_two_state: PlayerState {
             max_hit_points: max_hp,
             current_hit_points: max_hp
-        } 
+        },
+        player_one_action: None,
+        player_two_action: None
     };
     let path = "results.csv";
     let mut output = File::create(path).unwrap();
